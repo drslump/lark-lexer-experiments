@@ -1,0 +1,8 @@
+fsm.c
+lexer.c
+.pytest_cache/
+.python-version
+__pycache__/
+build/
+*.egg-info/
+*.pyc
