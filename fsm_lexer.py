@@ -149,6 +149,7 @@ with open('fsm.c') as fd:
 
 parser = Lark(GRAMMAR, parser='lalr', lexer='contextual', transformer=Re2cTransformer())
 lexer = parser.parse(data)
+# print(repr(lexer))
 
 _lex = lexer.compile(str_type=str, debug=False, annotate=False)
 # import dis; print(dis.dis(_lex))

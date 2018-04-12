@@ -256,6 +256,9 @@ class BitMap(Abstract):
 
         return ops
 
+    def __repr__(self):
+        return 'BitMap({}, {}, {})'.format(repr(self.label), repr(self.ofs), repr(self.mask))
+
 
 class State(Abstract):
     """ Holds the set of actions for a label
@@ -292,6 +295,11 @@ class State(Abstract):
             ops << action.opcodes(debug)
 
         return ops
+
+    def __repr__(self):
+        indent = lambda x: '\n  '.join(x.split('\n'))
+        actions = ['  ' + indent(repr(action)) for action in self.actions]
+        return 'State({}, [\n{}\n])'.format(repr(self.label), ',\n'.join(actions))
 
 
 class If(Abstract):
@@ -352,6 +360,12 @@ class If(Abstract):
 
         return ops
 
+    def __repr__(self):
+        true = repr(self.true)
+        false = repr(self.false)
+        return 'If({}, {}, {}, {}, varname={})'.format(
+            repr(self.op), repr(self.test), true, false, repr(self.varname))
+
 
 class Debug(Abstract):
     """ Prints debug information
@@ -379,6 +393,10 @@ class Debug(Abstract):
 
         return ops
 
+    def __repr__(self):
+        return 'Debug({}, *{})'.format(
+            repr(self.format), repr(self.args))
+
 
 class Goto(Abstract):
     """ Jumps to a specific label
@@ -392,6 +410,9 @@ class Goto(Abstract):
         ops = Opcodes()
         ops << JUMP_ABSOLUTE(self.label)
         return ops
+
+    def __repr__(self):
+        return 'Goto({})'.format(repr(self.label))
 
 
 class Consume(Abstract):
@@ -417,6 +438,9 @@ class Consume(Abstract):
 
         return ops
 
+    def __repr__(self):
+        return 'Consume(advance={})'.format(repr(self.advance))
+
 
 class Advance(Abstract):
     """ Advances to the next character in the stream
@@ -435,6 +459,9 @@ class Advance(Abstract):
 
         return ops
 
+    def __repr__(self):
+        return 'Advance()'
+
 
 class Retract(Abstract):
     """ Retracts to the next character in the stream
@@ -451,6 +478,9 @@ class Retract(Abstract):
         ops << Debug('FSM> Retract (ofs: {})', '$ofs').opcodes(debug)
 
         return ops
+
+    def __repr__(self):
+        return 'Retract()'
 
 
 class Mark(Abstract):
@@ -471,6 +501,9 @@ class Mark(Abstract):
         ops << Debug('FSM> Mark: {} (ofs: {})', '$yyaccept', '$ofs').opcodes(debug)
 
         return ops
+
+    def __repr__(self):
+        return 'Mark({})'.format(repr(self.mark))
 
 
 class Backtrack(Abstract):
@@ -500,6 +533,9 @@ class Backtrack(Abstract):
 
         return ops
 
+    def __repr__(self):
+        return 'Backtrack({})'.format(repr(self.gotos))
+
 
 class Produce(Abstract):
     """ Returns the current offset with an optional token
@@ -520,3 +556,6 @@ class Produce(Abstract):
         ops << BUILD_TUPLE(2)
         ops << RETURN_VALUE()
         return ops
+
+    def __repr__(self):
+        return 'Produce({})'.format(repr(self.token))

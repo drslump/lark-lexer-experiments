@@ -56,7 +56,11 @@ def lex_regex():
 
 @pytest.fixture
 def lex_fsm():
-    import fsm_lexer
+    try:
+        import fsm_lexer
+    except:
+        import gen_fsm_lexer as fsm_lexer
+
     return fsm_lexer.lex
 
 
