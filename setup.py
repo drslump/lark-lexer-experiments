@@ -7,9 +7,13 @@ import sys, subprocess
 class MyBuild(build):
     def run(self):
         print('Generating lexer.c...')
-        subprocess.check_output(['re2c', '-s', '-o', 'lexer.c', 'lexer.re'])
-        print('Generating fsm.c...')
-        subprocess.check_output(['re2c', '-s', '-o', 'fsm.c', 'fsm.re'])
+        subprocess.check_output(['re2c', '-r', '-o', 'lexer.c', 'lexer.re'])
+
+        print('Generating FSM lexers...')
+        with open('re2c_lexer.py', 'w') as fd:
+            fd.write(subprocess.check_output(['python', '-m', 're2c', 'grammar.g']))
+        with open('re2c_py_lexer.py', 'w') as fd:
+            fd.write(subprocess.check_output(['python', '-m', 're2c', 'python2.g']))
 
         build.run(self)
 

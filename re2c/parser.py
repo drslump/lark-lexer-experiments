@@ -1,9 +1,6 @@
-import sys
-from collections import defaultdict
-
 from lark import Lark, InlineTransformer
 
-from fsm import Goto, Backtrack, If, Mark, Retract, State, Produce, Consume, Advance
+from re2c.fsm import *
 
 
 GRAMMAR = r'''
@@ -17,8 +14,9 @@ GRAMMAR = r'''
                 | "{" CNAME? "}"   -> produce
 
     switch      : "switch" "(" CNAME ")" "{" case+ default? "}"
-    case        : ( "case" literal ":" )+ stmt
-    default     : "default" ":" stmt
+    case        : ( "case" literal ":" )+ case_block
+    default     : "default" ":" case_block
+    case_block  : ( expr ";" )+
 
     if_stmt     : "if" "(" CNAME OP literal ")" if_block [ "else" if_block ]
 
@@ -30,14 +28,16 @@ GRAMMAR = r'''
                 | "++YYCURSOR"                          -> advance
                 | "yych" "=" "*YYCURSOR"                -> consume
                 | "yych" "=" "*++YYCURSOR"              -> advance_consume
-                | "yych" "=" "*(YYMARKER = ++YYCURSOR)" -> advance_consume
+                | "yych" "=" "*(YYMARKER = ++YYCURSOR)" -> advance_save_consume
                 | "yyaccept" "=" literal                -> mark
                 | "YYCURSOR" "=" "YYMARKER"             -> backtrack
                 | "YYCURSOR" "-=" literal               -> retract
+                | "YYCTXMARKER" "=" "YYCURSOR"          -> context_save
+                | "YYCURSOR" "=" "YYCTXMARKER"          -> context_restore
 
     ?literal    : STRING                  -> string
                 | INT                     -> int
-                | "0x" HEXDIGIT HEXDIGIT  -> hex
+                | "0x" HEXDIGIT+          -> hex
 
     // dissambiguate with hex
     INT         : /0\b|[1-9]\d*/
@@ -70,41 +70,70 @@ class Re2cTransformer(InlineTransformer):
         return State(label, actions)
 
     def start(self, main, *states):
-        main.add(*states)
-        return main
+        return self._state_factory(None, [
+            main,
+            states
+        ])
 
     def main(self, *stmts):
-        return self._state_factory(None, [Mark(0)] + list(stmts))
+        return self._state_factory('$START', [Mark(0)] + list(stmts))
 
     def state(self, t_label, *stmts):
         return self._state_factory(t_label.value, stmts)
 
-    def switch(self, t_var, *stmts):
-        return list(stmts)
+    def switch(self, t_var, *cases):
+        # boost tests for whitespace, newlines and numbers
+        def sortkey(iff):
+            if iff.op in ('in', '=='):
+                if ' ' in iff.test:
+                    return -100
+                elif '\n' in iff.test:
+                    return -10
+                elif '0' in iff.test:
+                    return -1
+            return ord(iff.test[0])
+
+        cases = list(cases)
+        if isinstance(cases[-1], list):
+            default = cases.pop()
+        else:
+            default = []
+
+        cases.sort(key=sortkey)
+
+        cases.extend(default)
+        return cases
 
     def case(self, *args):
         assert len(args) >= 2
+
+        args = list(args)
+        block = args.pop()
+
         if type(args[0]) is int:
-            assert len(args) == 2
-            return If('==', args[0], args[1], varname='yyaccept')
+            assert len(args) == 1
+            return If('yyaccept', '==', args[0], block)
 
         buffer = bytearray()
-        for arg in args[:-1]:
+        for arg in args:
             buffer.extend(arg)
 
-        return If.IN(bytes(buffer), args[-1])
+        return If('yych', 'in', bytes(buffer), block)
 
-    def default(self, stmt):
-        return stmt
+    def case_block(self, *exprs):
+        return list(exprs)
+
+    def default(self, block):
+        return block
 
     def if_stmt(self, t_var, t_op, rhs, true, false=None):
-        return If(t_op.value, rhs, true, false, varname=t_var.value)
+        return If(t_var.value, t_op.value, rhs, true, false)
 
     def if_block(self, *stmts):
         return list(stmts)
 
     def backtrack(self):
-        return Backtrack()
+        return Restore('YYMARKER')
 
     def decl(self, *args):
         pass
@@ -122,16 +151,25 @@ class Re2cTransformer(InlineTransformer):
         return Retract()
 
     def advance_consume(self):
-        return (Advance(), Consume(False))
+        return (Advance(), Consume())
+
+    def advance_save_consume(self):
+        return (Advance(), Save('YYMARKER'), Consume())
 
     def consume(self):
-        return Consume(False)
+        return Consume()
 
     def produce(self, t = None):
         return Produce(t.value if t else None)
 
+    def context_save(self):
+        return Save('YYCTXMARKER')
+
+    def context_restore(self):
+        return Restore('YYCTXMARKER')
+
     def string(self, t):
-        # TODO: escape according to actual C rules
+        #XXX escape according to actual C rules
         v = t.value[1:-1]
         v = v.decode('string_escape')
         return v
@@ -139,33 +177,11 @@ class Re2cTransformer(InlineTransformer):
     def int(self, t):
         return int(t.value)
 
-    def hex(self, t1, t2):
-        return chr(bytearray.fromhex(t1.value + t2.value)[0])
+    def hex(self, *t_digit):
+        digits = ''.join(t.value for t in t_digit)
+        return chr(int(digits, 16))
 
 
-
-with open('fsm.c') as fd:
-    data = fd.read()
-
-parser = Lark(GRAMMAR, parser='lalr', lexer='contextual', transformer=Re2cTransformer())
-lexer = parser.parse(data)
-# print(repr(lexer))
-
-_lex = lexer.compile(str_type=str, debug=False, annotate=False)
-# import dis; print(dis.dis(_lex))
-
-def lex(stream, ofs=0, sentinel='\0'):
-    try:
-        while True:
-            end, token = _lex(stream, ofs)
-            if token is None:
-                raise RuntimeError('Unexpected char {} at {}'.format(repr(stream[ofs]), ofs))
-
-            assert end > ofs, 'lexer did not advance nor failed'
-
-            yield ofs, token, stream[ofs:end]
-            ofs = end
-    except IndexError:
-        # Retry with a sentinel to try to extract a last token
-        yield next(lex(stream[ofs:] + sentinel))
-
+def parse(re2c):
+    parser = Lark(GRAMMAR, parser='lalr', lexer='contextual', transformer=Re2cTransformer())
+    return parser.parse(re2c)
